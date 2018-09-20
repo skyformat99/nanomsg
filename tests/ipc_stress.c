@@ -1,6 +1,6 @@
 /*
     Copyright (c) 2012 Martin Sustrik  All rights reserved.
-    Copyright 2015 Garrett D'Amore <garrett@damore.org>
+    Copyright 2017 Garrett D'Amore <garrett@damore.org>
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"),
@@ -33,6 +33,8 @@
 #include "../src/utils/atomic.c"
 
 /*  Stress test the IPC transport. */
+
+#ifndef NN_HAVE_WSL
 
 #define THREAD_COUNT 10
 #define TEST_LOOPS 10
@@ -93,7 +95,7 @@ static void client(void *arg)
         bytes = nn_send (cli_sock, msg, sz_msg, 0);
         /*  This would better be handled via semaphore or condvar. */
         nn_sleep (100);
-        nn_assert (bytes == sz_msg);
+        nn_assert ((size_t)bytes == sz_msg);
         nn_close (cli_sock);
     }
 }
@@ -113,3 +115,11 @@ int main()
 
     return 0;
 }
+
+#else
+
+int main()
+{
+    return (0);
+}
+#endif

@@ -1,7 +1,7 @@
 /*
     Copyright (c) 2013 Martin Sustrik  All rights reserved.
     Copyright (c) 2013 GoPivotal, Inc.  All rights reserved.
-    Copyright 2016 Garrett D'Amore <garrett@damore.org>
+    Copyright 2017 Garrett D'Amore <garrett@damore.org>
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"),
@@ -134,7 +134,12 @@ void nn_usock_term (struct nn_usock *self)
     nn_fsm_event_term (&self->event_sent);
     nn_fsm_event_term (&self->event_established);
 
+    nn_worker_cancel (self->worker, &self->task_stop);
     nn_worker_cancel (self->worker, &self->task_recv);
+    nn_worker_cancel (self->worker, &self->task_send);
+    nn_worker_cancel (self->worker, &self->task_accept);
+    nn_worker_cancel (self->worker, &self->task_connected);
+    nn_worker_cancel (self->worker, &self->task_connecting);
 
     nn_worker_task_term (&self->task_stop);
     nn_worker_task_term (&self->task_recv);
@@ -285,10 +290,14 @@ int nn_usock_bind (struct nn_usock *self, const struct sockaddr *addr,
     /*  The socket can be bound only before it's connected. */
     nn_assert_state (self, NN_USOCK_STATE_STARTING);
 
+    /*  Windows Subsystem for Linux - SO_REUSEADDR is different,
+        and the Windows semantics are very wrong for us. */
+#ifndef NN_HAVE_WSL
     /*  Allow re-using the address. */
     opt = 1;
     rc = setsockopt (self->s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof (opt));
     errno_assert (rc == 0);
+#endif
 
     rc = bind (self->s, addr, (socklen_t) addrlen);
     if (nn_slow (rc != 0))
@@ -1076,6 +1085,7 @@ static int nn_usock_recv_raw (struct nn_usock *self, void *buf, size_t *len)
 #if defined NN_HAVE_MSG_CONTROL
     struct cmsghdr *cmsg;
 #endif
+    int fd;
 
     /*  If batch buffer doesn't exist, allocate it. The point of delayed
         deallocation to allow non-receiving sockets, such as TCP listening
@@ -1143,13 +1153,16 @@ static int nn_usock_recv_raw (struct nn_usock *self, void *buf, size_t *len)
 #if defined NN_HAVE_MSG_CONTROL
         cmsg = CMSG_FIRSTHDR (&hdr);
         while (cmsg) {
-            if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
+            if (cmsg->cmsg_level == SOL_SOCKET &&
+                  cmsg->cmsg_type == SCM_RIGHTS) {
                 if (self->in.pfd) {
-                    *self->in.pfd = *((int*) CMSG_DATA (cmsg));
+                    memcpy (self->in.pfd, CMSG_DATA (cmsg),
+                        sizeof (*self->in.pfd));
                     self->in.pfd = NULL;
                 }
                 else {
-                    nn_closefd (*((int*) CMSG_DATA (cmsg)));
+                    memcpy (&fd, CMSG_DATA (cmsg), sizeof (fd));
+                    nn_closefd (fd);
                 }
                 break;
             }
@@ -1159,11 +1172,13 @@ static int nn_usock_recv_raw (struct nn_usock *self, void *buf, size_t *len)
         if (hdr.msg_accrightslen > 0) {
             nn_assert (hdr.msg_accrightslen == sizeof (int));
             if (self->in.pfd) {
-                *self->in.pfd = *((int*) hdr.msg_accrights);
+                memcpy (self->in.pfd, hdr.msg_accrights,
+                    sizeof (*self->in.pfd));
                 self->in.pfd = NULL;
             }
             else {
-                nn_closefd (*((int*) hdr.msg_accrights));
+                memcpy (&fd, hdr.msg_accrights, sizeof (fd));
+                nn_closefd (fd);
             }
         }
 #endif

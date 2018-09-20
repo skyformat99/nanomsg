@@ -25,12 +25,11 @@
 
 #include "testutil.h"
 
-int main (int argc, const char *argv[])
+int main (NN_UNUSED int argc, const NN_UNUSED char *argv[])
 {
     int sb;
     int sc1;
     int sc2;
-    char socket_address[128];
 
     sb = test_socket (AF_SP, NN_PAIR);
     test_bind (sb, "inproc://pair");
